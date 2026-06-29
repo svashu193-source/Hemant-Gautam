@@ -1,10 +1,10 @@
-const pizzaHero = "/src/assets/images/pizza_hero_1782668640257.jpg";
-const momosLuxury = "/src/assets/images/momos_luxury_1782668652103.jpg";
-const chaapLuxury = "/src/assets/images/chaap_luxury_1782668664578.jpg";
-const diningHall = "/src/assets/images/dining_hall_1782668677775.jpg";
-const noodlesLuxury = "/src/assets/images/noodles_luxury_1782668695059.jpg";
-const friesLuxury = "/src/assets/images/fries_luxury_1782668706922.jpg";
-const birthdayPartyLuxury = "/src/assets/images/birthday_party_luxury_1782668719188.jpg";
+import pizzaHero from "./assets/images/pizza_hero_1782668640257.jpg";
+import momosLuxury from "./assets/images/momos_luxury_1782668652103.jpg";
+import chaapLuxury from "./assets/images/chaap_luxury_1782668664578.jpg";
+import diningHall from "./assets/images/dining_hall_1782668677775.jpg";
+import noodlesLuxury from "./assets/images/noodles_luxury_1782668695059.jpg";
+import friesLuxury from "./assets/images/fries_luxury_1782668706922.jpg";
+import birthdayPartyLuxury from "./assets/images/birthday_party_luxury_1782668719188.jpg";
 
 export interface MenuItem {
   id: string;
