@@ -28,7 +28,11 @@ import {
   Minus,
   Send,
   Check,
-  Award
+  Award,
+  History,
+  Edit3,
+  Truck,
+  Package
 } from "lucide-react";
 import {
   MENU_ITEMS,
@@ -40,6 +44,7 @@ import {
   Review,
   GalleryItem
 } from "./data";
+import SaraAssistant from "./components/SaraAssistant";
 
 // Helper for Lucide icons mapping dynamically
 const iconMap: Record<string, any> = {
@@ -71,6 +76,154 @@ export default function App() {
   // Interactive Cart Drawer state
   const [cart, setCart] = useState<CartItem[]>([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
+  const [recentMeals, setRecentMeals] = useState<MenuItem[]>([]);
+  const [justAddedId, setJustAddedId] = useState<string | null>(null);
+  const [isCartAnimating, setIsCartAnimating] = useState(false);
+  const [orderNotes, setOrderNotes] = useState("");
+
+  // Checkout flow states: "cart" | "info-form" | "summary"
+  const [checkoutStep, setCheckoutStep] = useState<"cart" | "info-form" | "summary">("cart");
+
+  // Customer Information State with persistence
+  const [customerInfo, setCustomerInfo] = useState(() => {
+    try {
+      const saved = localStorage.getItem("chatkara_customer_info");
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.error("Error loading customer info", e);
+    }
+    return {
+      fullName: "",
+      mobileNumber: "",
+      emailAddress: "",
+      deliveryAddress: "",
+      city: "",
+      state: "",
+      postalCode: "",
+      country: "India",
+      landmark: ""
+    };
+  });
+
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+
+  const validateCustomerInfo = (info: typeof customerInfo) => {
+    const errors: Record<string, string> = {};
+    if (!info.fullName.trim()) {
+      errors.fullName = "Full name is required";
+    }
+    if (!info.mobileNumber.trim()) {
+      errors.mobileNumber = "Mobile number is required";
+    } else {
+      const mobileRegex = /^\+?[0-9\s\-()]{10,15}$/;
+      if (!mobileRegex.test(info.mobileNumber.trim())) {
+        errors.mobileNumber = "Please enter a valid mobile format (10-15 digits)";
+      }
+    }
+    if (!info.deliveryAddress.trim()) {
+      errors.deliveryAddress = "Complete delivery address is required";
+    }
+    if (!info.city.trim()) {
+      errors.city = "City is required";
+    }
+    if (!info.state.trim()) {
+      errors.state = "State is required";
+    }
+    if (!info.postalCode.trim()) {
+      errors.postalCode = "Postal/ZIP code is required";
+    }
+    if (!info.country.trim()) {
+      errors.country = "Country is required";
+    }
+    if (info.emailAddress.trim()) {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(info.emailAddress.trim())) {
+        errors.emailAddress = "Please enter a valid email address";
+      }
+    }
+    return errors;
+  };
+
+  const isCustomerInfoCompleted = () => {
+    const errors = validateCustomerInfo(customerInfo);
+    return Object.keys(errors).length === 0;
+  };
+
+  // Automatically save customer info to localStorage when updated
+  useEffect(() => {
+    try {
+      localStorage.setItem("chatkara_customer_info", JSON.stringify(customerInfo));
+    } catch (e) {
+      console.error("Error saving customer info", e);
+    }
+  }, [customerInfo]);
+
+  // Reset checkout step to cart when closed
+  useEffect(() => {
+    if (!isCartOpen) {
+      setCheckoutStep("cart");
+      setFormErrors({});
+    }
+  }, [isCartOpen]);
+
+  // Active Order Tracking State with local persistence
+  const [activeOrderTracker, setActiveOrderTracker] = useState<{
+    id: string;
+    status: "Confirmed" | "Preparing" | "Out for Delivery";
+    itemsCount: number;
+    total: number;
+  } | null>(() => {
+    try {
+      const saved = localStorage.getItem("chatkara_active_order_tracker");
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.error("Error loading active order tracker", e);
+    }
+    return null;
+  });
+
+  // Automatically save/remove active order tracker to/from localStorage when updated
+  useEffect(() => {
+    try {
+      if (activeOrderTracker) {
+        localStorage.setItem("chatkara_active_order_tracker", JSON.stringify(activeOrderTracker));
+      } else {
+        localStorage.removeItem("chatkara_active_order_tracker");
+      }
+    } catch (e) {
+      console.error("Error saving active order tracker", e);
+    }
+  }, [activeOrderTracker]);
+
+  // Handle active order status transitioning: Confirmed -> Preparing -> Out for Delivery
+  useEffect(() => {
+    if (!activeOrderTracker) return;
+
+    let timer: NodeJS.Timeout;
+
+    if (activeOrderTracker.status === "Confirmed") {
+      timer = setTimeout(() => {
+        setActiveOrderTracker(prev => prev ? { ...prev, status: "Preparing" } : null);
+      }, 15000); // 15 seconds
+    } else if (activeOrderTracker.status === "Preparing") {
+      timer = setTimeout(() => {
+        setActiveOrderTracker(prev => prev ? { ...prev, status: "Out for Delivery" } : null);
+      }, 15000); // 15 seconds
+    }
+
+    return () => clearTimeout(timer);
+  }, [activeOrderTracker?.status]);
+
+  const handleSaveAndProceed = () => {
+    playClickSound();
+    const errors = validateCustomerInfo(customerInfo);
+    if (Object.keys(errors).length > 0) {
+      setFormErrors(errors);
+      return;
+    }
+    setFormErrors({});
+    setCheckoutStep("summary");
+  };
 
   // Interactive Reservation Modal
   const [isBookingOpen, setIsBookingOpen] = useState(false);
@@ -125,33 +278,51 @@ export default function App() {
       delay: Math.random() * 5
     }));
     setParticles(generated);
+
+    // Load recent meals from localStorage
+    const stored = localStorage.getItem("chatkara_recent_meals");
+    if (stored) {
+      try {
+        setRecentMeals(JSON.parse(stored));
+      } catch (e) {
+        console.error("Error reading recent meals", e);
+      }
+    }
   }, []);
 
   // Track scrolling for active sections and progress bar
   useEffect(() => {
+    let ticking = false;
+
     const handleScroll = () => {
-      const totalScroll = document.documentElement.scrollHeight - window.innerHeight;
-      if (totalScroll > 0) {
-        setScrollProgress((window.scrollY / totalScroll) * 100);
-      }
-
-      // Check active section
-      const sections = ["home", "about", "menu", "facilities", "events", "gallery", "reviews", "contact"];
-      const scrollPos = window.scrollY + 200;
-
-      for (const section of sections) {
-        const el = document.getElementById(section);
-        if (el) {
-          const top = el.offsetTop;
-          const height = el.offsetHeight;
-          if (scrollPos >= top && scrollPos < top + height) {
-            setActiveSection(section);
+      if (!ticking) {
+        window.requestAnimationFrame(() => {
+          const totalScroll = document.documentElement.scrollHeight - window.innerHeight;
+          if (totalScroll > 0) {
+            setScrollProgress((window.scrollY / totalScroll) * 100);
           }
-        }
+
+          // Check active section
+          const sections = ["home", "about", "menu", "facilities", "events", "gallery", "reviews", "contact"];
+          const scrollPos = window.scrollY + 200;
+
+          for (const section of sections) {
+            const el = document.getElementById(section);
+            if (el) {
+              const top = el.offsetTop;
+              const height = el.offsetHeight;
+              if (scrollPos >= top && scrollPos < top + height) {
+                setActiveSection(section);
+              }
+            }
+          }
+          ticking = false;
+        });
+        ticking = true;
       }
     };
 
-    window.addEventListener("scroll", handleScroll);
+    window.addEventListener("scroll", handleScroll, { passive: true });
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
@@ -178,6 +349,17 @@ export default function App() {
   // Cart Handlers
   const addToCart = (item: MenuItem) => {
     playClickSound();
+    setJustAddedId(item.id);
+    setIsCartAnimating(true);
+    
+    // Clear temporary animation/check-mark states after 1.5 seconds
+    setTimeout(() => {
+      setJustAddedId((current) => current === item.id ? null : current);
+    }, 1500);
+    setTimeout(() => {
+      setIsCartAnimating(false);
+    }, 1500);
+
     setCart((prev) => {
       const existing = prev.find((i) => i.menuItem.id === item.id);
       if (existing) {
@@ -213,13 +395,85 @@ export default function App() {
 
   const handleCheckoutWhatsApp = () => {
     playClickSound();
+    
+    // First, validate inputs completely
+    const errors = validateCustomerInfo(customerInfo);
+    if (Object.keys(errors).length > 0) {
+      setFormErrors(errors);
+      setCheckoutStep("info-form");
+      return;
+    }
+
     const phone = "919368218143"; // For Hemant Gautam Chatkara Restaurant
     const itemsList = cart
       .map((item) => `• ${item.menuItem.title} x${item.quantity} (${item.menuItem.price})`)
       .join("\n");
-    const total = getCartTotal();
-    const message = `*Hemant Gautam Chatkara Restaurant - New Order*\n\nHey Hemant, I'd like to place an order:\n\n${itemsList}\n\n*Total Amount:* ₹${total}\n\nThank you!`;
+    
+    const subtotal = getCartTotal();
+    const shipping = 40; // Flat Shipping Cost
+    const taxes = Math.round(subtotal * 0.05); // 5% GST
+    const totalWithFees = subtotal + shipping + taxes;
+
+    const landmarkText = customerInfo.landmark.trim() ? `\n• Landmark: ${customerInfo.landmark.trim()}` : "";
+    const emailText = customerInfo.emailAddress.trim() ? `\n• Email: ${customerInfo.emailAddress.trim()}` : "";
+
+    const customerDetailsText = 
+`*Customer Details:*
+• Name: ${customerInfo.fullName.trim()}
+• Mobile: ${customerInfo.mobileNumber.trim()}${emailText}
+• Delivery Address: ${customerInfo.deliveryAddress.trim()}${landmarkText}
+• City/State/ZIP: ${customerInfo.city.trim()}, ${customerInfo.state.trim()} - ${customerInfo.postalCode.trim()}
+• Country: ${customerInfo.country.trim()}`;
+
+    const notesSection = orderNotes.trim() ? `\n\n*Special Instructions:*\n_"${orderNotes.trim()}"_` : "";
+
+    const message = `*Hemant Gautam Chatkara Restaurant - New Order*
+
+${customerDetailsText}
+
+*Order Items:*
+${itemsList}${notesSection}
+
+*Payment Summary:*
+• Subtotal: ₹${subtotal}
+• Shipping Cost: ₹${shipping}
+• Taxes (5% GST): ₹${taxes}
+• *Total Invoice Amount:* ₹${totalWithFees}
+
+Thank you!`;
+
     const encoded = encodeURIComponent(message);
+
+    // Save recent meals to localStorage
+    setRecentMeals((prev) => {
+      const currentItems = cart.map((i) => i.menuItem);
+      const combined = [...currentItems, ...prev];
+      const unique: MenuItem[] = [];
+      const seen = new Set<string>();
+      for (const item of combined) {
+        if (!seen.has(item.id)) {
+          seen.add(item.id);
+          unique.push(item);
+        }
+      }
+      const updated = unique.slice(0, 3);
+      localStorage.setItem("chatkara_recent_meals", JSON.stringify(updated));
+      return updated;
+    });
+
+    // Set mock active order status tracker
+    setActiveOrderTracker({
+      id: "HGCR-ORD-" + Math.floor(100000 + Math.random() * 900000),
+      status: "Confirmed",
+      itemsCount: cart.reduce((acc, curr) => acc + curr.quantity, 0),
+      total: totalWithFees
+    });
+
+    // Clear notes after placement and reset flow
+    setOrderNotes("");
+    setCart([]);
+    setCheckoutStep("cart");
+    setIsCartOpen(false);
     window.open(`https://wa.me/${phone}?text=${encoded}`, "_blank");
   };
 
@@ -340,11 +594,37 @@ export default function App() {
                 setIsCartOpen(true);
                 playClickSound();
               }}
-              className="relative p-2.5 rounded-xl liquid-glass-btn hover:bg-white/15 text-gray-200 hover:text-amber-400 clickable flex items-center justify-center"
+              className={`relative p-2.5 rounded-xl transition-all duration-300 clickable flex items-center justify-center ${
+                isCartAnimating
+                  ? "bg-emerald-500/20 border border-emerald-500 text-emerald-400 shadow-[0_0_12px_rgba(16,185,129,0.3)]"
+                  : "liquid-glass-btn hover:bg-white/15 text-gray-200 hover:text-amber-400"
+              }`}
               title="View Cart"
               id="cart-trigger"
             >
-              <ShoppingCart className="w-5 h-5" />
+              <AnimatePresence mode="wait">
+                {isCartAnimating ? (
+                  <motion.div
+                    key="animating"
+                    initial={{ scale: 0.6, rotate: -20 }}
+                    animate={{ scale: 1, rotate: 0 }}
+                    exit={{ scale: 0.6, rotate: 20 }}
+                    className="flex items-center justify-center"
+                  >
+                    <Check className="w-5 h-5 text-emerald-400" />
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    key="normal"
+                    initial={{ scale: 0.8 }}
+                    animate={{ scale: 1 }}
+                    exit={{ scale: 0.8 }}
+                    className="flex items-center justify-center"
+                  >
+                    <ShoppingCart className="w-5 h-5" />
+                  </motion.div>
+                )}
+              </AnimatePresence>
               {cart.length > 0 && (
                 <span className="absolute -top-1.5 -right-1.5 bg-amber-500 text-black text-[11px] font-bold w-5 h-5 rounded-full flex items-center justify-center animate-bounce shadow-md">
                   {cart.reduce((sum, item) => sum + item.quantity, 0)}
@@ -375,10 +655,36 @@ export default function App() {
                 setIsCartOpen(true);
                 playClickSound();
               }}
-              className="relative p-2.5 rounded-xl bg-white/5 border border-white/10 text-gray-200 clickable flex items-center justify-center"
+              className={`relative p-2.5 rounded-xl border transition-all duration-300 clickable flex items-center justify-center ${
+                isCartAnimating
+                  ? "bg-emerald-500/20 border-emerald-500 text-emerald-400"
+                  : "bg-white/5 border-white/10 text-gray-200"
+              }`}
               id="mobile-cart-trigger"
             >
-              <ShoppingCart className="w-5 h-5" />
+              <AnimatePresence mode="wait">
+                {isCartAnimating ? (
+                  <motion.div
+                    key="animating-mob"
+                    initial={{ scale: 0.6 }}
+                    animate={{ scale: 1 }}
+                    exit={{ scale: 0.6 }}
+                    className="flex items-center justify-center"
+                  >
+                    <Check className="w-5 h-5 text-emerald-400" />
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    key="normal-mob"
+                    initial={{ scale: 0.8 }}
+                    animate={{ scale: 1 }}
+                    exit={{ scale: 0.8 }}
+                    className="flex items-center justify-center"
+                  >
+                    <ShoppingCart className="w-5 h-5" />
+                  </motion.div>
+                )}
+              </AnimatePresence>
               {cart.length > 0 && (
                 <span className="absolute -top-1 -right-1 bg-amber-500 text-black text-[10px] font-bold w-4.5 h-4.5 rounded-full flex items-center justify-center shadow-sm">
                   {cart.reduce((sum, item) => sum + item.quantity, 0)}
@@ -817,11 +1123,38 @@ export default function App() {
                     <div className="pt-2">
                       <button
                         onClick={() => addToCart(item)}
-                        className="w-full py-3 rounded-xl text-center font-display font-semibold text-xs tracking-wide liquid-glass-btn hover:border-amber-500/50 hover:text-amber-400 flex items-center justify-center space-x-2 clickable"
+                        className={`w-full py-3 rounded-xl text-center font-display font-semibold text-xs tracking-wide transition-all duration-300 flex items-center justify-center space-x-2 clickable ${
+                          justAddedId === item.id
+                            ? "bg-emerald-500/20 border-2 border-emerald-500 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.3)]"
+                            : "liquid-glass-btn hover:border-amber-500/50 hover:text-amber-400"
+                        }`}
                         id={`order-${item.id}`}
                       >
-                        <ShoppingCart className="w-4 h-4" />
-                        <span>Order Now</span>
+                        <AnimatePresence mode="wait">
+                          {justAddedId === item.id ? (
+                            <motion.div
+                              key="added"
+                              initial={{ scale: 0.8, opacity: 0 }}
+                              animate={{ scale: 1, opacity: 1 }}
+                              exit={{ scale: 0.8, opacity: 0 }}
+                              className="flex items-center space-x-1"
+                            >
+                              <Check className="w-4 h-4 text-emerald-400" />
+                              <span>Added!</span>
+                            </motion.div>
+                          ) : (
+                            <motion.div
+                              key="default"
+                              initial={{ scale: 0.9, opacity: 0 }}
+                              animate={{ scale: 1, opacity: 1 }}
+                              exit={{ scale: 0.9, opacity: 0 }}
+                              className="flex items-center space-x-2"
+                            >
+                              <ShoppingCart className="w-4 h-4" />
+                              <span>Order Now</span>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
                       </button>
                     </div>
                   </div>
@@ -1438,101 +1771,509 @@ export default function App() {
               {/* Cart Items List */}
               <div className="flex-grow overflow-y-auto p-6 space-y-4">
                 {cart.length === 0 ? (
-                  <div className="h-full flex flex-col items-center justify-center text-center space-y-4">
-                    <div className="w-16 h-16 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-gray-500">
-                      <ShoppingCart className="w-7 h-7" />
+                  <div className="h-full flex flex-col justify-between">
+                    <div className="flex-grow flex flex-col items-center justify-center text-center space-y-4 py-8">
+                      <div className="w-16 h-16 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-gray-500">
+                        <ShoppingCart className="w-7 h-7" />
+                      </div>
+                      <div className="space-y-1">
+                        <h4 className="font-display font-bold text-base text-gray-400">Your cart is empty</h4>
+                        <p className="text-xs text-gray-500 max-w-xs font-light">
+                          Browse through our delicious items and click "Order Now" to add dishes to your bucket.
+                        </p>
+                      </div>
                     </div>
+
+                    {/* Recent Orders Section when empty */}
+                    {recentMeals.length > 0 && (
+                      <div className="mt-6 pt-6 border-t border-white/10 space-y-4">
+                        <div className="flex items-center space-x-2 text-amber-400">
+                          <History className="w-4 h-4" />
+                          <h4 className="font-display font-bold text-xs uppercase tracking-wider font-mono">Recent Ordered Meals</h4>
+                        </div>
+                        <p className="text-[11px] text-gray-400 text-left">One-click quick re-ordering to populate your cart:</p>
+                        <div className="space-y-3 text-left">
+                          {recentMeals.map((meal) => (
+                            <div 
+                              key={meal.id} 
+                              className="glass p-3 rounded-xl border border-white/8 hover:border-amber-500/30 transition-all flex items-center justify-between group"
+                            >
+                              <div className="flex items-center space-x-3">
+                                <div className="w-10 h-10 rounded-lg overflow-hidden border border-white/10">
+                                  <img 
+                                    src={meal.image} 
+                                    alt={meal.title} 
+                                    referrerPolicy="no-referrer"
+                                    className="w-full h-full object-cover" 
+                                  />
+                                </div>
+                                <div className="text-left">
+                                  <h5 className="text-xs font-bold text-white group-hover:text-amber-400 transition-colors leading-tight">{meal.title}</h5>
+                                  <p className="text-[11px] text-amber-500 font-mono mt-0.5">{meal.price}</p>
+                                </div>
+                              </div>
+                              <button
+                                onClick={() => addToCart(meal)}
+                                className="px-2.5 py-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500 hover:text-black border border-amber-500/20 text-amber-400 text-xs font-bold transition-all flex items-center space-x-1 clickable"
+                              >
+                                <Plus className="w-3.5 h-3.5" />
+                                <span>Reorder</span>
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : checkoutStep === "info-form" ? (
+                  <div className="space-y-4 text-left">
+                    <div className="flex items-center justify-between pb-2 border-b border-white/10">
+                      <h4 className="font-display font-bold text-base text-amber-400">Customer Information</h4>
+                      <span className="text-[10px] font-mono text-gray-500 uppercase">Step 2 of 3</span>
+                    </div>
+
+                    {/* Full Name */}
                     <div className="space-y-1">
-                      <h4 className="font-display font-bold text-base text-gray-400">Your cart is empty</h4>
-                      <p className="text-xs text-gray-500 max-w-xs font-light">
-                        Browse through our delicious items and click "Order Now" to add dishes to your bucket.
-                      </p>
+                      <label className="text-[10px] text-gray-400 font-mono uppercase tracking-wider block">
+                        Full Name <span className="text-rose-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={customerInfo.fullName}
+                        onChange={(e) => setCustomerInfo(prev => ({ ...prev, fullName: e.target.value }))}
+                        placeholder="e.g. John Doe"
+                        className={`w-full px-3.5 py-2 text-xs rounded-xl bg-white/5 border ${formErrors.fullName ? "border-rose-500" : "border-white/10"} text-white placeholder-gray-500 focus:outline-none focus:border-amber-500/50 transition-all duration-200`}
+                      />
+                      {formErrors.fullName && <p className="text-[10px] text-rose-500 font-mono mt-1">{formErrors.fullName}</p>}
+                    </div>
+
+                    {/* Mobile Number */}
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-gray-400 font-mono uppercase tracking-wider block">
+                        Mobile Number (Required) <span className="text-rose-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={customerInfo.mobileNumber}
+                        onChange={(e) => setCustomerInfo(prev => ({ ...prev, mobileNumber: e.target.value }))}
+                        placeholder="e.g. 9119100100"
+                        className={`w-full px-3.5 py-2 text-xs rounded-xl bg-white/5 border ${formErrors.mobileNumber ? "border-rose-500" : "border-white/10"} text-white placeholder-gray-500 focus:outline-none focus:border-amber-500/50 transition-all duration-200`}
+                      />
+                      {formErrors.mobileNumber && <p className="text-[10px] text-rose-500 font-mono mt-1">{formErrors.mobileNumber}</p>}
+                    </div>
+
+                    {/* Email Address */}
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-gray-400 font-mono uppercase tracking-wider block">
+                        Email Address (Optional)
+                      </label>
+                      <input
+                        type="email"
+                        value={customerInfo.emailAddress}
+                        onChange={(e) => setCustomerInfo(prev => ({ ...prev, emailAddress: e.target.value }))}
+                        placeholder="e.g. john@example.com"
+                        className={`w-full px-3.5 py-2 text-xs rounded-xl bg-white/5 border ${formErrors.emailAddress ? "border-rose-500" : "border-white/10"} text-white placeholder-gray-500 focus:outline-none focus:border-amber-500/50 transition-all duration-200`}
+                      />
+                      {formErrors.emailAddress && <p className="text-[10px] text-rose-500 font-mono mt-1">{formErrors.emailAddress}</p>}
+                    </div>
+
+                    {/* Complete Delivery Address */}
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-gray-400 font-mono uppercase tracking-wider block">
+                        Complete Delivery Address (Required) <span className="text-rose-500">*</span>
+                      </label>
+                      <textarea
+                        value={customerInfo.deliveryAddress}
+                        onChange={(e) => setCustomerInfo(prev => ({ ...prev, deliveryAddress: e.target.value }))}
+                        placeholder="Street address, apartment, suite, etc."
+                        className={`w-full px-3.5 py-2 text-xs rounded-xl bg-white/5 border ${formErrors.deliveryAddress ? "border-rose-500" : "border-white/10"} text-white placeholder-gray-500 focus:outline-none focus:border-amber-500/50 transition-all duration-200 h-16 resize-none`}
+                      />
+                      {formErrors.deliveryAddress && <p className="text-[10px] text-rose-500 font-mono mt-1">{formErrors.deliveryAddress}</p>}
+                    </div>
+
+                    {/* Landmark */}
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-gray-400 font-mono uppercase tracking-wider block">
+                        Landmark (Optional)
+                      </label>
+                      <input
+                        type="text"
+                        value={customerInfo.landmark}
+                        onChange={(e) => setCustomerInfo(prev => ({ ...prev, landmark: e.target.value }))}
+                        placeholder="e.g. Near Maliyon Mandir"
+                        className="w-full px-3.5 py-2 text-xs rounded-xl bg-white/5 border border-white/10 text-white placeholder-gray-500 focus:outline-none focus:border-amber-500/50 transition-all duration-200"
+                      />
+                    </div>
+
+                    {/* City & State (Two column layout) */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-gray-400 font-mono uppercase tracking-wider block">
+                          City <span className="text-rose-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={customerInfo.city}
+                          onChange={(e) => setCustomerInfo(prev => ({ ...prev, city: e.target.value }))}
+                          placeholder="e.g. Hapur"
+                          className={`w-full px-3.5 py-2 text-xs rounded-xl bg-white/5 border ${formErrors.city ? "border-rose-500" : "border-white/10"} text-white placeholder-gray-500 focus:outline-none focus:border-amber-500/50 transition-all duration-200`}
+                        />
+                        {formErrors.city && <p className="text-[10px] text-rose-500 font-mono mt-1">{formErrors.city}</p>}
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-gray-400 font-mono uppercase tracking-wider block">
+                          State <span className="text-rose-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={customerInfo.state}
+                          onChange={(e) => setCustomerInfo(prev => ({ ...prev, state: e.target.value }))}
+                          placeholder="e.g. Uttar Pradesh"
+                          className={`w-full px-3.5 py-2 text-xs rounded-xl bg-white/5 border ${formErrors.state ? "border-rose-500" : "border-white/10"} text-white placeholder-gray-500 focus:outline-none focus:border-amber-500/50 transition-all duration-200`}
+                        />
+                        {formErrors.state && <p className="text-[10px] text-rose-500 font-mono mt-1">{formErrors.state}</p>}
+                      </div>
+                    </div>
+
+                    {/* Postal Code & Country (Two column layout) */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-gray-400 font-mono uppercase tracking-wider block">
+                          Postal/ZIP Code <span className="text-rose-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={customerInfo.postalCode}
+                          onChange={(e) => setCustomerInfo(prev => ({ ...prev, postalCode: e.target.value }))}
+                          placeholder="e.g. 245101"
+                          className={`w-full px-3.5 py-2 text-xs rounded-xl bg-white/5 border ${formErrors.postalCode ? "border-rose-500" : "border-white/10"} text-white placeholder-gray-500 focus:outline-none focus:border-amber-500/50 transition-all duration-200`}
+                        />
+                        {formErrors.postalCode && <p className="text-[10px] text-rose-500 font-mono mt-1">{formErrors.postalCode}</p>}
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-gray-400 font-mono uppercase tracking-wider block">
+                          Country <span className="text-rose-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={customerInfo.country}
+                          onChange={(e) => setCustomerInfo(prev => ({ ...prev, country: e.target.value }))}
+                          placeholder="e.g. India"
+                          className={`w-full px-3.5 py-2 text-xs rounded-xl bg-white/5 border ${formErrors.country ? "border-rose-500" : "border-white/10"} text-white placeholder-gray-500 focus:outline-none focus:border-amber-500/50 transition-all duration-200`}
+                        />
+                        {formErrors.country && <p className="text-[10px] text-rose-500 font-mono mt-1">{formErrors.country}</p>}
+                      </div>
+                    </div>
+                  </div>
+                ) : checkoutStep === "summary" ? (
+                  <div className="space-y-5 text-left">
+                    <div className="flex items-center justify-between pb-2 border-b border-white/10">
+                      <h4 className="font-display font-bold text-base text-amber-400">Order Checkout Summary</h4>
+                      <span className="text-[10px] font-mono text-gray-500 uppercase">Step 3 of 3</span>
+                    </div>
+
+                    {/* Customer Information Card */}
+                    <div className="glass p-4 rounded-2xl border border-white/8 space-y-3 shadow-md relative overflow-hidden bg-white/[0.02]">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-2 text-amber-400">
+                          <UserCheck className="w-4 h-4" />
+                          <h5 className="text-xs font-display font-bold uppercase tracking-wider font-mono">Customer Information</h5>
+                        </div>
+                        <button
+                          onClick={() => { setCheckoutStep("info-form"); playClickSound(); }}
+                          className="px-2.5 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500 hover:text-black border border-amber-500/20 text-amber-400 text-[10px] font-bold transition-all flex items-center space-x-1.5 clickable"
+                        >
+                          <Edit3 className="w-3 h-3" />
+                          <span>Edit Details</span>
+                        </button>
+                      </div>
+
+                      <div className="space-y-1.5 text-xs text-gray-300">
+                        <div className="grid grid-cols-3 gap-1">
+                          <span className="text-gray-400 font-mono text-[10px] uppercase">Name:</span>
+                          <span className="col-span-2 text-white font-medium">{customerInfo.fullName}</span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-1">
+                          <span className="text-gray-400 font-mono text-[10px] uppercase">Mobile:</span>
+                          <span className="col-span-2 text-white font-medium">{customerInfo.mobileNumber}</span>
+                        </div>
+                        {customerInfo.emailAddress && (
+                          <div className="grid grid-cols-3 gap-1">
+                            <span className="text-gray-400 font-mono text-[10px] uppercase">Email:</span>
+                            <span className="col-span-2 text-white font-medium">{customerInfo.emailAddress}</span>
+                          </div>
+                        )}
+                        <div className="grid grid-cols-3 gap-1">
+                          <span className="text-gray-400 font-mono text-[10px] uppercase">Address:</span>
+                          <span className="col-span-2 text-white leading-snug">
+                            {customerInfo.deliveryAddress}
+                            {customerInfo.landmark && <span className="block text-[11px] text-gray-400 mt-0.5 font-light">Landmark: {customerInfo.landmark}</span>}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-1">
+                          <span className="text-gray-400 font-mono text-[10px] uppercase">Location:</span>
+                          <span className="col-span-2 text-white font-medium">
+                            {customerInfo.city}, {customerInfo.state} - {customerInfo.postalCode}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-1">
+                          <span className="text-gray-400 font-mono text-[10px] uppercase">Country:</span>
+                          <span className="col-span-2 text-white font-medium">{customerInfo.country}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Ordered Products Section */}
+                    <div className="space-y-2.5">
+                      <div className="flex items-center space-x-2 text-amber-400">
+                        <Utensils className="w-4 h-4" />
+                        <h5 className="text-xs font-display font-bold uppercase tracking-wider font-mono">Ordered Products</h5>
+                      </div>
+                      
+                      <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                        {cart.map((item) => (
+                          <div
+                            key={item.menuItem.id}
+                            className="glass p-3 rounded-xl border border-white/5 flex items-center justify-between"
+                          >
+                            <div className="flex items-center space-x-2.5">
+                              <div className="w-9 h-9 rounded-lg overflow-hidden border border-white/10 flex-shrink-0">
+                                <img
+                                  src={item.menuItem.image}
+                                  alt={item.menuItem.title}
+                                  referrerPolicy="no-referrer"
+                                  className="w-full h-full object-cover"
+                                />
+                              </div>
+                              <div className="text-left min-w-0">
+                                <h6 className="text-xs font-bold text-white truncate leading-tight">{item.menuItem.title}</h6>
+                                <p className="text-[10px] text-gray-400 font-mono mt-0.5">
+                                  Qty: {item.quantity} × {item.menuItem.price}
+                                </p>
+                              </div>
+                            </div>
+                            <span className="text-xs font-mono font-bold text-white">
+                              ₹{parseInt(item.menuItem.price.replace("₹", "")) * item.quantity}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 ) : (
-                  cart.map((item) => (
-                    <div
-                      key={item.menuItem.id}
-                      className="glass p-4 rounded-2xl border border-white/8 shadow-md flex items-center space-x-4 relative overflow-hidden"
-                    >
-                      <div className="w-16 h-16 rounded-xl overflow-hidden flex-shrink-0 border border-white/10">
-                        <img
-                          src={item.menuItem.image}
-                          alt={item.menuItem.title}
-                          referrerPolicy="no-referrer"
-                          className="w-full h-full object-cover"
-                        />
-                      </div>
-                      <div className="flex-grow space-y-1">
-                        <h4 className="font-display font-bold text-sm text-white leading-snug">
-                          {item.menuItem.title}
-                        </h4>
-                        <p className="text-xs text-amber-400 font-mono font-semibold">
-                          {item.menuItem.price}
-                        </p>
-                        
-                        {/* Quantity adjust block */}
-                        <div className="flex items-center space-x-2.5 pt-1.5">
-                          <button
-                            onClick={() => updateCartQuantity(item.menuItem.id, -1)}
-                            className="p-1 rounded-md bg-white/5 border border-white/10 hover:bg-white/15 text-gray-300 clickable"
-                          >
-                            <Minus className="w-3.5 h-3.5" />
-                          </button>
-                          <span className="text-sm font-mono text-white font-medium">
-                            {item.quantity}
+                  <>
+                    {cart.map((item) => (
+                      <div
+                        key={item.menuItem.id}
+                        className="glass p-4 rounded-2xl border border-white/8 shadow-md flex items-center space-x-4 relative overflow-hidden"
+                      >
+                        <div className="w-16 h-16 rounded-xl overflow-hidden flex-shrink-0 border border-white/10">
+                          <img
+                            src={item.menuItem.image}
+                            alt={item.menuItem.title}
+                            referrerPolicy="no-referrer"
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                        <div className="flex-grow space-y-1">
+                          <h4 className="font-display font-bold text-sm text-white leading-snug">
+                            {item.menuItem.title}
+                          </h4>
+                          <p className="text-xs text-amber-400 font-mono font-semibold">
+                            {item.menuItem.price}
+                          </p>
+                          
+                          {/* Quantity adjust block */}
+                          <div className="flex items-center space-x-2.5 pt-1.5">
+                            <button
+                              onClick={() => updateCartQuantity(item.menuItem.id, -1)}
+                              className="p-1 rounded-md bg-white/5 border border-white/10 hover:bg-white/15 text-gray-300 clickable"
+                            >
+                              <Minus className="w-3.5 h-3.5" />
+                            </button>
+                            <span className="text-sm font-mono text-white font-medium">
+                              {item.quantity}
+                            </span>
+                            <button
+                              onClick={() => updateCartQuantity(item.menuItem.id, 1)}
+                              className="p-1 rounded-md bg-white/5 border border-white/10 hover:bg-white/15 text-gray-300 clickable"
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Item Total */}
+                        <div className="text-right flex flex-col justify-between h-full">
+                          <span className="text-sm font-mono font-bold text-white">
+                            ₹{parseInt(item.menuItem.price.replace("₹", "")) * item.quantity}
                           </span>
-                          <button
-                            onClick={() => updateCartQuantity(item.menuItem.id, 1)}
-                            className="p-1 rounded-md bg-white/5 border border-white/10 hover:bg-white/15 text-gray-300 clickable"
-                          >
-                            <Plus className="w-3.5 h-3.5" />
-                          </button>
                         </div>
                       </div>
+                    ))}
 
-                      {/* Item Total */}
-                      <div className="text-right flex flex-col justify-between h-full">
-                        <span className="text-sm font-mono font-bold text-white">
-                          ₹{parseInt(item.menuItem.price.replace("₹", "")) * item.quantity}
-                        </span>
+                    {/* Recent Orders Section when NOT empty */}
+                    {recentMeals.length > 0 && (
+                      <div className="mt-8 pt-6 border-t border-white/10 space-y-3">
+                        <div className="flex items-center space-x-2 text-amber-400">
+                          <History className="w-4 h-4" />
+                          <h4 className="font-display font-bold text-xs uppercase tracking-wider font-mono">Recent Ordered Meals</h4>
+                        </div>
+                        <p className="text-[10px] text-gray-400 text-left">Quickly add another from your favorites:</p>
+                        <div className="grid grid-cols-1 gap-2">
+                          {recentMeals.map((meal) => (
+                            <div 
+                              key={meal.id} 
+                              className="glass px-3 py-2.5 rounded-xl border border-white/5 flex items-center justify-between group hover:border-white/10 transition-all"
+                            >
+                              <div className="flex items-center space-x-2.5 min-w-0">
+                                <div className="w-8 h-8 rounded-lg overflow-hidden border border-white/10 flex-shrink-0">
+                                  <img 
+                                    src={meal.image} 
+                                    alt={meal.title} 
+                                    referrerPolicy="no-referrer"
+                                    className="w-full h-full object-cover" 
+                                  />
+                                </div>
+                                <div className="min-w-0 text-left">
+                                  <h5 className="text-[11px] font-bold text-white truncate group-hover:text-amber-400 transition-colors leading-none">{meal.title}</h5>
+                                  <p className="text-[10px] text-amber-500 font-mono mt-1">{meal.price}</p>
+                                </div>
+                              </div>
+                              <button
+                                onClick={() => addToCart(meal)}
+                                className="p-1.5 rounded-lg bg-white/5 hover:bg-amber-500 hover:text-black border border-white/10 hover:border-amber-500 text-gray-300 text-xs font-bold transition-all flex items-center justify-center clickable"
+                                title="Add to order again"
+                              >
+                                <Plus className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  ))
+                    )}
+                  </>
                 )}
               </div>
 
               {/* Checkout Calculation Panel */}
               {cart.length > 0 && (
                 <div className="p-6 border-t border-white/10 bg-black/40 space-y-4">
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-xs text-gray-400 font-mono">
-                      <span>Subtotal</span>
-                      <span>₹{getCartTotal()}</span>
-                    </div>
-                    <div className="flex justify-between text-xs text-gray-400 font-mono">
-                      <span>SGST / CGST Tax</span>
-                      <span className="text-emerald-400 font-medium">₹0.00 (Free)</span>
-                    </div>
-                    <div className="flex justify-between text-xs text-gray-400 font-mono">
-                      <span>Service Charge</span>
-                      <span className="text-emerald-400 font-medium">₹0.00 (Free)</span>
-                    </div>
-                    <div className="h-[1px] bg-white/10 my-1" />
-                    <div className="flex justify-between text-base font-display font-extrabold text-white">
-                      <span>Total Invoice</span>
-                      <span className="text-amber-400 font-mono">₹{getCartTotal()}</span>
-                    </div>
-                  </div>
+                  {checkoutStep === "cart" ? (
+                    <>
+                      <div className="space-y-2">
+                        <div className="flex justify-between text-xs text-gray-400 font-mono">
+                          <span>Subtotal</span>
+                          <span>₹{getCartTotal()}</span>
+                        </div>
+                        <div className="flex justify-between text-xs text-gray-400 font-mono">
+                          <span>SGST / CGST Tax</span>
+                          <span className="text-emerald-400 font-medium">₹0.00 (Free)</span>
+                        </div>
+                        <div className="flex justify-between text-xs text-gray-400 font-mono">
+                          <span>Delivery Charge</span>
+                          <span className="text-emerald-400 font-medium">₹0.00 (Free)</span>
+                        </div>
+                        <div className="h-[1px] bg-white/10 my-1" />
+                        <div className="flex justify-between text-base font-display font-extrabold text-white">
+                          <span>Total Invoice</span>
+                          <span className="text-amber-400 font-mono">₹{getCartTotal()}</span>
+                        </div>
+                      </div>
 
-                  <button
-                    onClick={handleCheckoutWhatsApp}
-                    className="w-full py-4 rounded-xl text-center text-black font-display font-bold text-sm tracking-wide liquid-glass-btn-gold shadow-lg hover:brightness-110 flex items-center justify-center space-x-2.5 clickable"
-                    id="checkout-whatsapp-btn"
-                  >
-                    <MessageCircleIcon className="w-5 h-5 text-black" />
-                    <span>Place Order via WhatsApp</span>
-                  </button>
+                      <button
+                        onClick={() => {
+                          playClickSound();
+                          if (isCustomerInfoCompleted()) {
+                            setCheckoutStep("summary");
+                          } else {
+                            setCheckoutStep("info-form");
+                          }
+                        }}
+                        className="w-full py-4 rounded-xl text-center text-black font-display font-bold text-sm tracking-wide liquid-glass-btn-gold shadow-lg hover:brightness-110 flex items-center justify-center space-x-2.5 clickable"
+                        id="checkout-proceed-btn"
+                      >
+                        <span>Proceed to Checkout</span>
+                        <ArrowRight className="w-4 h-4 text-black animate-pulse" />
+                      </button>
+                    </>
+                  ) : checkoutStep === "info-form" ? (
+                    <>
+                      <div className="grid grid-cols-2 gap-3">
+                        <button
+                          onClick={() => { playClickSound(); setCheckoutStep("cart"); }}
+                          className="py-3 px-4 rounded-xl text-center text-white font-display font-bold text-xs bg-white/5 border border-white/10 hover:bg-white/15 hover:border-white/20 transition-all flex items-center justify-center space-x-1.5 clickable"
+                        >
+                          <ChevronLeft className="w-3.5 h-3.5" />
+                          <span>Back to Cart</span>
+                        </button>
+                        <button
+                          onClick={handleSaveAndProceed}
+                          className="py-3 px-4 rounded-xl text-center text-black font-display font-bold text-xs liquid-glass-btn-gold hover:brightness-110 shadow-md transition-all flex items-center justify-center space-x-1.5 clickable"
+                        >
+                          <span>Save & Continue</span>
+                          <ChevronRight className="w-3.5 h-3.5 text-black" />
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      {/* Preparation Notes / Special Instructions Input */}
+                      <div className="space-y-1.5 text-left">
+                        <label htmlFor="order-notes" className="text-[10px] text-gray-400 font-mono uppercase tracking-wider block">
+                          Preparation Notes & Instructions
+                        </label>
+                        <textarea
+                          id="order-notes"
+                          value={orderNotes}
+                          onChange={(e) => setOrderNotes(e.target.value)}
+                          placeholder="e.g. Make it extra spicy, less oil, or any allergies..."
+                          maxLength={180}
+                          className="w-full px-3.5 py-2 text-xs rounded-xl bg-white/5 border border-white/10 text-white placeholder-gray-500 focus:outline-none focus:border-amber-500/50 transition-all duration-200 resize-none h-14"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <div className="flex justify-between text-xs text-gray-400 font-mono">
+                          <span>Subtotal</span>
+                          <span>₹{getCartTotal()}</span>
+                        </div>
+                        <div className="flex justify-between text-xs text-gray-400 font-mono">
+                          <span>Shipping & Delivery Cost</span>
+                          <span>₹40</span>
+                        </div>
+                        <div className="flex justify-between text-xs text-gray-400 font-mono">
+                          <span>Taxes (5% GST)</span>
+                          <span>₹{Math.round(getCartTotal() * 0.05)}</span>
+                        </div>
+                        <div className="h-[1px] bg-white/10 my-1" />
+                        <div className="flex justify-between text-base font-display font-extrabold text-white">
+                          <span>Total Amount</span>
+                          <span className="text-amber-400 font-mono">
+                            ₹{getCartTotal() + 40 + Math.round(getCartTotal() * 0.05)}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3">
+                        <button
+                          onClick={handleCheckoutWhatsApp}
+                          className="w-full py-4 rounded-xl text-center text-black font-display font-bold text-sm tracking-wide liquid-glass-btn-gold shadow-lg hover:brightness-110 flex items-center justify-center space-x-2.5 clickable"
+                          id="checkout-whatsapp-btn"
+                        >
+                          <MessageCircleIcon className="w-5 h-5 text-black" />
+                          <span>Place Order via WhatsApp</span>
+                        </button>
+                        
+                        <button
+                          onClick={() => { setCheckoutStep("info-form"); playClickSound(); }}
+                          className="w-full text-center text-[10px] text-gray-400 hover:text-amber-400 font-mono uppercase tracking-widest transition-colors block clickable"
+                        >
+                          ← Change Customer Information
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
             </motion.div>
@@ -1831,6 +2572,148 @@ export default function App() {
         )}
       </AnimatePresence>
 
+      {/* Active Order Status Tracker */}
+      <AnimatePresence>
+        {activeOrderTracker && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 50, scale: 0.95 }}
+            transition={{ type: "spring", stiffness: 300, damping: 25 }}
+            className="fixed bottom-4 left-4 md:left-6 z-40 max-w-md w-[calc(100vw-2rem)] md:w-96 glass p-5 rounded-2xl border border-amber-500/30 shadow-2xl bg-black/95 text-left overflow-hidden"
+          >
+            {/* Ambient Background Glow */}
+            <div className="absolute top-0 right-0 w-24 h-24 bg-amber-500/10 rounded-full blur-2xl pointer-events-none" />
+            
+            {/* Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-white/10 relative">
+              <div className="flex items-center space-x-2">
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 animate-duration-1000"></span>
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                </span>
+                <h4 className="font-display font-extrabold text-xs md:text-sm text-white tracking-wide">Live Order Tracker</h4>
+              </div>
+              <div className="flex items-center space-x-1.5">
+                <span className="text-[9px] font-mono bg-white/10 px-2 py-0.5 rounded-md text-amber-300 font-bold uppercase tracking-wider">
+                  {activeOrderTracker.id}
+                </span>
+                <button
+                  onClick={() => {
+                    playClickSound();
+                    setActiveOrderTracker(null);
+                  }}
+                  className="p-1 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-colors clickable"
+                  title="Dismiss Tracker"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Main content */}
+            <div className="mt-4 space-y-4">
+              {/* Order Info */}
+              <div className="flex justify-between text-xs text-gray-300">
+                <span>Items Ordered: <strong className="text-white font-mono">{activeOrderTracker.itemsCount}</strong></span>
+                <span>Total Bill: <strong className="text-amber-400 font-mono">₹{activeOrderTracker.total}</strong></span>
+              </div>
+
+              {/* Status Visual Progress Bar */}
+              <div className="relative pt-1">
+                {/* Gray progress background bar */}
+                <div className="overflow-hidden h-1.5 text-xs flex rounded bg-white/10">
+                  <motion.div
+                    initial={{ width: "0%" }}
+                    animate={{
+                      width: 
+                        activeOrderTracker.status === "Confirmed" ? "15%" :
+                        activeOrderTracker.status === "Preparing" ? "50%" :
+                        "100%"
+                    }}
+                    transition={{ type: "spring", stiffness: 80, damping: 15 }}
+                    className="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-gradient-to-r from-amber-500 to-orange-500 rounded-full"
+                  />
+                </div>
+              </div>
+
+              {/* Flow Steps layout */}
+              <div className="grid grid-cols-3 gap-1 pt-1">
+                {/* Step 1: Confirmed */}
+                <div className="text-center flex flex-col items-center">
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${
+                    activeOrderTracker.status === "Confirmed" 
+                      ? "bg-amber-500 text-black font-extrabold ring-4 ring-amber-500/20 scale-110" 
+                      : "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40"
+                  }`}>
+                    {activeOrderTracker.status !== "Confirmed" ? (
+                      <Check className="w-4 h-4 stroke-[3]" />
+                    ) : (
+                      <Package className="w-4 h-4 animate-bounce" />
+                    )}
+                  </div>
+                  <span className="text-[10px] mt-1.5 font-bold font-display text-white tracking-wide block">Confirmed</span>
+                  <span className="text-[8px] text-gray-400 font-mono mt-0.5 leading-tight">Order Received</span>
+                </div>
+
+                {/* Step 2: Preparing */}
+                <div className="text-center flex flex-col items-center">
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${
+                    activeOrderTracker.status === "Preparing"
+                      ? "bg-amber-500 text-black font-extrabold ring-4 ring-amber-500/20 scale-110"
+                      : activeOrderTracker.status === "Confirmed"
+                        ? "bg-white/5 text-gray-400 border border-white/10"
+                        : "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40"
+                  }`}>
+                    {activeOrderTracker.status === "Out for Delivery" ? (
+                      <Check className="w-4 h-4 stroke-[3]" />
+                    ) : (
+                      <ChefHat className={`w-4 h-4 ${activeOrderTracker.status === "Preparing" ? "animate-pulse" : ""}`} />
+                    )}
+                  </div>
+                  <span className="text-[10px] mt-1.5 font-bold font-display tracking-wide block transition-colors duration-300" style={{
+                    color: activeOrderTracker.status === "Confirmed" ? "rgba(156, 163, 175, 0.4)" : "#ffffff"
+                  }}>Preparing</span>
+                  <span className="text-[8px] text-gray-400 font-mono mt-0.5 leading-tight">Chef Cooking</span>
+                </div>
+
+                {/* Step 3: Out for Delivery */}
+                <div className="text-center flex flex-col items-center">
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${
+                    activeOrderTracker.status === "Out for Delivery"
+                      ? "bg-amber-500 text-black font-extrabold ring-4 ring-amber-500/20 scale-110"
+                      : "bg-white/5 text-gray-400 border border-white/10"
+                  }`}>
+                    <Truck className={`w-4 h-4 ${activeOrderTracker.status === "Out for Delivery" ? "animate-bounce" : ""}`} />
+                  </div>
+                  <span className="text-[10px] mt-1.5 font-bold font-display tracking-wide block transition-colors duration-300" style={{
+                    color: activeOrderTracker.status !== "Out for Delivery" ? "rgba(156, 163, 175, 0.4)" : "#ffffff"
+                  }}>On the Way</span>
+                  <span className="text-[8px] text-gray-400 font-mono mt-0.5 leading-tight">Out for Delivery</span>
+                </div>
+              </div>
+
+              {/* Status Message Footer */}
+              <div className="bg-white/5 rounded-xl p-2.5 border border-white/5 flex items-center space-x-2.5 mt-2">
+                <Clock className="w-4 h-4 text-amber-400 shrink-0" />
+                <p className="text-[10.5px] text-gray-300 leading-normal">
+                  {activeOrderTracker.status === "Confirmed" && (
+                    <>Your order has been sent to Chatkara Restaurant. Awaiting shop confirmation via WhatsApp.</>
+                  )}
+                  {activeOrderTracker.status === "Preparing" && (
+                    <>Chef is preparing your sizzling food with premium ingredients and hygienic controls.</>
+                  )}
+                  {activeOrderTracker.status === "Out for Delivery" && (
+                    <>Our hot & fresh food is out for delivery! The delivery driver is headed to your address.</>
+                  )}
+                </p>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <SaraAssistant />
     </div>
   );
 }

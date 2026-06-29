@@ -1,6 +1,6 @@
 {
   "name": "Hemant Gautam Chatkara",
   "description": "A premium, Apple-inspired restaurant experience serving wood-fired pizza, momos, chaap, noodles, and authentic fast food in a Liquid Glass aesthetic.",
-  "requestFramePermissions": [],
+  "requestFramePermissions": ["microphone"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
