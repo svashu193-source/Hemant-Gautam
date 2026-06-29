@@ -32,7 +32,8 @@ import {
   History,
   Edit3,
   Truck,
-  Package
+  Package,
+  Search
 } from "lucide-react";
 import {
   MENU_ITEMS,
@@ -72,6 +73,7 @@ export default function App() {
 
   // Menu Filter state
   const [selectedCategory, setSelectedCategory] = useState("All");
+  const [menuSearchQuery, setMenuSearchQuery] = useState("");
 
   // Interactive Cart Drawer state
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -489,9 +491,12 @@ Thank you!`;
   // Unique categories for filtering
   const categories = ["All", "🍕 Pizza", "🥟 Momos", "🌯 All Types of Chaap", "🍜 Noodles", "🍟 French Fries", "🥤 Cold Drinks"];
 
-  const filteredMenuItems = selectedCategory === "All"
-    ? MENU_ITEMS
-    : MENU_ITEMS.filter((item) => item.category === selectedCategory);
+  const filteredMenuItems = MENU_ITEMS.filter((item) => {
+    const matchesCategory = selectedCategory === "All" || item.category === selectedCategory;
+    const matchesSearch = item.title.toLowerCase().includes(menuSearchQuery.toLowerCase()) || 
+                          item.description.toLowerCase().includes(menuSearchQuery.toLowerCase());
+    return matchesCategory && matchesSearch;
+  });
 
   return (
     <div className="relative min-h-screen bg-[#030303] text-gray-100 overflow-x-hidden selection:bg-amber-500 selection:text-black">
@@ -767,7 +772,7 @@ Thank you!`;
       {/* HERO SECTION */}
       <section
         id="home"
-        className="relative min-h-[92vh] flex items-center justify-center pt-8 pb-16 overflow-hidden"
+        className="relative min-h-[92dvh] flex items-center justify-center pt-8 pb-16 overflow-hidden"
       >
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 w-full grid grid-cols-1 lg:grid-cols-12 gap-12 items-center relative z-10">
           
@@ -1043,7 +1048,7 @@ Thank you!`;
           </div>
 
           {/* Liquid Style Category Navigation Bar */}
-          <div className="flex justify-center mb-12">
+          <div className="flex justify-center mb-10">
             <div className="p-1.5 rounded-2xl glass border border-white/10 flex flex-wrap justify-center items-center gap-1.5 max-w-full">
               {categories.map((cat) => (
                 <button
@@ -1061,6 +1066,48 @@ Thank you!`;
                   {cat}
                 </button>
               ))}
+            </div>
+          </div>
+
+          {/* Dynamic Liquid Glass Search Bar */}
+          <div className="max-w-md mx-auto mb-12 relative z-20">
+            <div className="relative group">
+              {/* Glowing Background Ring */}
+              <div className="absolute -inset-0.5 bg-gradient-to-r from-amber-500 to-amber-600 rounded-2xl blur opacity-30 group-focus-within:opacity-50 transition duration-300 pointer-events-none" />
+              
+              <div className="relative flex items-center rounded-2xl glass border border-white/10 px-4 py-3 bg-zinc-950/40 backdrop-blur-md">
+                <Search className="w-5 h-5 text-gray-400 group-focus-within:text-amber-500 transition-colors duration-300 mr-3 shrink-0" />
+                <input
+                  type="text"
+                  value={menuSearchQuery}
+                  onChange={(e) => setMenuSearchQuery(e.target.value)}
+                  placeholder="Search dishes... (e.g. Pizza, Momos, Chaap)"
+                  className="w-full bg-transparent border-none text-white placeholder-gray-500 text-sm focus:outline-none focus:ring-0 font-sans"
+                />
+                
+                {menuSearchQuery && (
+                  <button
+                    onClick={() => {
+                      setMenuSearchQuery("");
+                      playClickSound();
+                    }}
+                    className="p-1 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-all clickable shrink-0"
+                    title="Clear Search"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Results count indicator */}
+            <div className="mt-2.5 flex justify-between items-center px-2">
+              <span className="text-[11px] font-mono text-gray-500 uppercase tracking-widest">
+                {menuSearchQuery ? "Active Filter" : "All Dishes"}
+              </span>
+              <span className="text-[11px] font-mono text-gray-400">
+                Found <span className="text-amber-500 font-bold">{filteredMenuItems.length}</span> {filteredMenuItems.length === 1 ? "item" : "items"}
+              </span>
             </div>
           </div>
 
@@ -1161,6 +1208,34 @@ Thank you!`;
                 </motion.div>
               ))}
             </AnimatePresence>
+            
+            {filteredMenuItems.length === 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="col-span-full py-16 text-center text-gray-400 font-light max-w-md mx-auto space-y-4"
+              >
+                <div className="w-14 h-14 rounded-full bg-white/5 border border-white/10 flex items-center justify-center mx-auto text-amber-500">
+                  <Search className="w-6 h-6" />
+                </div>
+                <div className="space-y-1">
+                  <h4 className="text-white font-display font-bold text-lg">No Items Found</h4>
+                  <p className="text-xs sm:text-sm text-gray-400">
+                    We couldn't find any dishes matching "<span className="text-amber-500 font-semibold">{menuSearchQuery}</span>" in this category. Try adjusting your query or category!
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    setMenuSearchQuery("");
+                    setSelectedCategory("All");
+                    playClickSound();
+                  }}
+                  className="px-5 py-2.5 rounded-xl bg-amber-500 text-black text-xs font-semibold hover:bg-amber-400 transition-colors duration-200 clickable inline-flex items-center space-x-1.5 shadow-md shadow-amber-500/10"
+                >
+                  <span>Reset All Filters</span>
+                </button>
+              </motion.div>
+            )}
           </motion.div>
 
         </div>
@@ -2512,13 +2587,13 @@ Thank you!`;
                 initial={{ scale: 0.95, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
                 exit={{ scale: 0.95, opacity: 0 }}
-                className="relative rounded-3xl overflow-hidden max-h-[75vh] max-w-full border border-white/15 shadow-2xl bg-black"
+                className="relative rounded-3xl overflow-hidden max-h-[75dvh] max-w-full border border-white/15 shadow-2xl bg-black"
               >
                 <img
                   src={GALLERY_ITEMS[lightboxIndex].image}
                   alt={GALLERY_ITEMS[lightboxIndex].title}
                   referrerPolicy="no-referrer"
-                  className="max-h-[75vh] w-auto max-w-full object-contain mx-auto"
+                  className="max-h-[75dvh] w-auto max-w-full object-contain mx-auto"
                 />
                 
                 {/* Title overlay info bar */}
